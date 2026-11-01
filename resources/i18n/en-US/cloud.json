@@ -1,0 +1,74 @@
+{
+  "tab": {
+    "files": "Files",
+    "profile": "Profile"
+  },
+  "login": {
+    "title": "Scan to sign in",
+    "requesting": "Requesting QR code…",
+    "scan": "Scan with the Quark app",
+    "waiting": "Waiting for scan",
+    "scanned": "Scanned, confirm on your phone",
+    "expired": "QR code expired, tap refresh",
+    "success": "Signed in"
+  },
+  "files": {
+    "root": "All files",
+    "empty": "Empty folder",
+    "empty_picker": "No subfolders here",
+    "login_hint": "Please sign in on the Profile tab first",
+    "hint_browse": "Y New folder  X Actions",
+    "hint_picker": "Y Choose this folder",
+    "pick_here": "Choose this folder",
+    "mkdir": "New folder",
+    "unsupported": "This file type cannot be previewed",
+    "delete_confirm": "Delete",
+    "type": {
+      "dir": "Folder",
+      "video": "Video",
+      "audio": "Audio",
+      "image": "Image",
+      "other": "File"
+    },
+    "action": {
+      "rename": "Rename",
+      "delete": "Delete",
+      "move": "Move to…",
+      "cancel": "Cancel"
+    }
+  },
+  "player": {
+    "loading": "Loading…",
+    "unavailable": "Playback is not supported in this build",
+    "no_stream": "No playable stream found",
+    "error": "Playback error",
+    "paused": "Paused",
+    "quality": "Quality",
+    "hint_video": "A Play/Pause  ←/→ Seek  Y Quality  B Exit",
+    "hint_audio": "A Play/Pause  ←/→ Seek  B Exit"
+  },
+  "image": {
+    "loading": "Loading…",
+    "error": "Failed to load image",
+    "prev": "Previous",
+    "next": "Next"
+  },
+  "profile": {
+    "section": {
+      "provider": "Drive",
+      "account": "Account",
+      "about": "About"
+    },
+    "provider": "Current drive",
+    "nickname": "Nickname",
+    "member": "Membership",
+    "capacity": "Storage",
+    "unknown": "Unknown user",
+    "login": "Sign in with QR code",
+    "logout": "Sign out",
+    "logged_out": "Signed out",
+    "version": "Version",
+    "refresh": "Refresh account",
+    "refreshing": "Refreshing…"
+  }
+}

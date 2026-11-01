@@ -20,10 +20,20 @@ struct HttpResult {
     std::string error;
     /// Raw "Set-Cookie" header returned by the server (may be empty).
     std::string setCookie;
+    /// Cookies parsed from all Set-Cookie headers of the final response.
+    std::map<std::string, std::string> cookies;
+    /// All response headers, keys lowercased (multi-value headers keep the
+    /// last value; use `cookies` for Set-Cookie).
+    std::map<std::string, std::string> headers;
 
     /// Parses body as JSON. Returns a discarded value on failure.
     nlohmann::json json() const;
 };
+
+/// Merges cookie pairs into an existing "k1=v1; k2=v2" cookie string.
+/// New pairs override same-named entries. Returns the merged string.
+std::string mergeCookies(const std::string& existing,
+                         const std::map<std::string, std::string>& pairs);
 
 /// Thin, reusable wrapper around cpr: base url, default query/headers,
 /// cookies and JSON helpers. Safe to call from worker threads.
@@ -41,6 +51,7 @@ public:
 
     void setBearerToken(const std::string& token) { bearer = token; }
     void setVerifySsl(bool verify) { verifySsl = verify; }
+    void setFollowRedirects(bool follow) { followRedirects = follow; }
 
     void setTimeout(int milliseconds) { timeoutMs = milliseconds; }
     int timeout() const { return timeoutMs; }
@@ -54,11 +65,14 @@ public:
                   std::function<void(const HttpResult&)> callback, int timeout = -1) const;
     void postAsync(const std::string& path, const Query& query, const Query& form,
                    std::function<void(const HttpResult&)> callback, int timeout = -1) const;
+    void postJsonAsync(const std::string& path, const Query& query, const nlohmann::json& body,
+                       std::function<void(const HttpResult&)> callback, int timeout = -1) const;
 
 private:
     std::string urlFor(const std::string& path) const;
     cpr::Header headers() const;
     int timeoutFor(int timeout) const;
+    cpr::Redirect redirect() const;
 
     static cpr::Parameters toParameters(const Query& query);
     static cpr::Payload toPayload(const Query& form);
@@ -68,6 +82,7 @@ private:
     std::string cookieValue;
     std::string bearer;
     bool verifySsl = true;
+    bool followRedirects = true;
     int timeoutMs = 10000;
 };
 

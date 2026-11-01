@@ -11,6 +11,7 @@ option(USE_SDL2 "using sdl2 for input and create window" OFF)
 
 # Which sample apps to build. Disable the ones you don't need.
 option(NXKIT_APP_MUSIC "build the music sample app" ON)
+option(NXKIT_APP_CLOUD "build the cloud drive app" ON)
 
 if(USE_SDL2)
     message("SDL2")
@@ -110,4 +111,8 @@ add_subdirectory(core)
 
 if(NXKIT_APP_MUSIC)
     add_subdirectory(apps/music)
+endif()
+
+if(NXKIT_APP_CLOUD)
+    add_subdirectory(apps/cloud)
 endif()

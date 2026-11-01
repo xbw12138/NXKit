@@ -20,10 +20,15 @@ HttpResult fromResponse(const cpr::Response& response) {
     result.body = response.text;
 
     for (const auto& header : response.header) {
-        if (lower(header.first) == "set-cookie") {
+        std::string name = lower(header.first);
+        result.headers[name] = header.second;
+        if (name == "set-cookie") {
             if (!result.setCookie.empty()) result.setCookie += "; ";
             result.setCookie += header.second;
         }
+    }
+    for (const auto& cookie : response.cookies) {
+        result.cookies[cookie.GetName()] = cookie.GetValue();
     }
 
     if (response.error) {
@@ -39,6 +44,28 @@ HttpResult fromResponse(const cpr::Response& response) {
 }
 
 }  // namespace
+
+std::string mergeCookies(const std::string& existing,
+                         const std::map<std::string, std::string>& pairs) {
+    std::map<std::string, std::string> merged;
+    size_t pos = 0;
+    while (pos < existing.size()) {
+        size_t end = existing.find("; ", pos);
+        if (end == std::string::npos) end = existing.size();
+        std::string pair = existing.substr(pos, end - pos);
+        size_t eq = pair.find('=');
+        if (eq != std::string::npos && eq > 0) merged[pair.substr(0, eq)] = pair.substr(eq + 1);
+        pos = end + 2;
+    }
+    for (const auto& pair : pairs) merged[pair.first] = pair.second;
+
+    std::string out;
+    for (const auto& pair : merged) {
+        if (!out.empty()) out += "; ";
+        out += pair.first + "=" + pair.second;
+    }
+    return out;
+}
 
 nlohmann::json HttpResult::json() const {
     nlohmann::json parsed = nlohmann::json::parse(body, nullptr, false);
@@ -60,6 +87,7 @@ void HttpClient::clearHeaders() { extraHeaders.clear(); }
 
 std::string HttpClient::urlFor(const std::string& path) const {
     if (path.empty()) return base;
+    if (path.compare(0, 7, "http://") == 0 || path.compare(0, 8, "https://") == 0) return path;
     if (path[0] == '/') return base + path;
     return base + "/" + path;
 }
@@ -73,6 +101,8 @@ cpr::Header HttpClient::headers() const {
 }
 
 int HttpClient::timeoutFor(int timeout) const { return timeout > 0 ? timeout : timeoutMs; }
+
+cpr::Redirect HttpClient::redirect() const { return cpr::Redirect{followRedirects}; }
 
 cpr::Parameters HttpClient::toParameters(const Query& query) {
     cpr::Parameters parameters;
@@ -88,8 +118,9 @@ cpr::Payload HttpClient::toPayload(const Query& form) {
 }
 
 HttpResult HttpClient::get(const std::string& path, const Query& query, int timeout) const {
-    cpr::Response response = cpr::Get(cpr::Url{urlFor(path)}, toParameters(query), headers(),
-                                      cpr::VerifySsl{verifySsl}, cpr::Timeout{timeoutFor(timeout)});
+    cpr::Response response =
+        cpr::Get(cpr::Url{urlFor(path)}, toParameters(query), headers(), redirect(),
+                 cpr::VerifySsl{verifySsl}, cpr::Timeout{timeoutFor(timeout)});
     return fromResponse(response);
 }
 
@@ -97,7 +128,7 @@ HttpResult HttpClient::post(const std::string& path, const Query& query, const Q
                             int timeout) const {
     cpr::Response response =
         cpr::Post(cpr::Url{urlFor(path)}, toParameters(query), headers(), toPayload(form),
-                  cpr::VerifySsl{verifySsl}, cpr::Timeout{timeoutFor(timeout)});
+                  redirect(), cpr::VerifySsl{verifySsl}, cpr::Timeout{timeoutFor(timeout)});
     return fromResponse(response);
 }
 
@@ -108,14 +139,14 @@ HttpResult HttpClient::postJson(const std::string& path, const Query& query,
 
     cpr::Response response =
         cpr::Post(cpr::Url{urlFor(path)}, toParameters(query), header, cpr::Body{body.dump()},
-                  cpr::VerifySsl{verifySsl}, cpr::Timeout{timeoutFor(timeout)});
+                  redirect(), cpr::VerifySsl{verifySsl}, cpr::Timeout{timeoutFor(timeout)});
     return fromResponse(response);
 }
 
 void HttpClient::getAsync(const std::string& path, const Query& query,
                           std::function<void(const HttpResult&)> callback, int timeout) const {
     cpr::GetCallback([callback](const cpr::Response& response) { callback(fromResponse(response)); },
-                     cpr::Url{urlFor(path)}, toParameters(query), headers(),
+                     cpr::Url{urlFor(path)}, toParameters(query), headers(), redirect(),
                      cpr::VerifySsl{verifySsl}, cpr::Timeout{timeoutFor(timeout)});
 }
 
@@ -123,7 +154,18 @@ void HttpClient::postAsync(const std::string& path, const Query& query, const Qu
                            std::function<void(const HttpResult&)> callback, int timeout) const {
     cpr::PostCallback([callback](const cpr::Response& response) { callback(fromResponse(response)); },
                       cpr::Url{urlFor(path)}, toParameters(query), headers(), toPayload(form),
-                      cpr::VerifySsl{verifySsl}, cpr::Timeout{timeoutFor(timeout)});
+                      redirect(), cpr::VerifySsl{verifySsl}, cpr::Timeout{timeoutFor(timeout)});
+}
+
+void HttpClient::postJsonAsync(const std::string& path, const Query& query,
+                               const nlohmann::json& body,
+                               std::function<void(const HttpResult&)> callback, int timeout) const {
+    cpr::Header header = headers();
+    header["Content-Type"] = "application/json";
+
+    cpr::PostCallback([callback](const cpr::Response& response) { callback(fromResponse(response)); },
+                      cpr::Url{urlFor(path)}, toParameters(query), header, cpr::Body{body.dump()},
+                      redirect(), cpr::VerifySsl{verifySsl}, cpr::Timeout{timeoutFor(timeout)});
 }
 
 }  // namespace nxkit

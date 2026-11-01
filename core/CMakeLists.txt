@@ -14,3 +14,24 @@ target_link_libraries(nxkit_core PUBLIC
         pystring
         z
         )
+
+# -----------------------------------------------------------------------------
+# Optional libmpv based video/audio player (nxkit/media/mpv_core.hpp).
+# Enabled by default on Switch (devkitPro portlibs provide mpv), optional on
+# desktop (-DNXKIT_WITH_MPV=ON, needs pkg-config to find mpv).
+# -----------------------------------------------------------------------------
+if(PLATFORM_SWITCH)
+    set(NXKIT_WITH_MPV_DEFAULT ON)
+else()
+    set(NXKIT_WITH_MPV_DEFAULT OFF)
+endif()
+option(NXKIT_WITH_MPV "build the libmpv based media player" ${NXKIT_WITH_MPV_DEFAULT})
+
+if(NXKIT_WITH_MPV)
+    find_package(PkgConfig REQUIRED)
+    pkg_search_module(MPV REQUIRED mpv)
+    target_compile_definitions(nxkit_core PUBLIC NXKIT_WITH_MPV)
+    target_include_directories(nxkit_core PUBLIC ${MPV_INCLUDE_DIRS})
+    target_link_libraries(nxkit_core PUBLIC ${MPV_LIBRARIES})
+    target_link_directories(nxkit_core PUBLIC ${MPV_LIBRARY_DIRS})
+endif()
