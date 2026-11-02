@@ -20,7 +20,7 @@ static void addTab(AutoTabFrame* tabs, const std::string& label,
     tabs->addTab(item, std::move(creator));
 }
 
-MainActivity::MainActivity() {
+brls::View* MainActivity::createContentView() {
     AutoTabFrame* tabs = new AutoTabFrame();
     tabs->setSideBarPosition(AutoTabBarPosition::TOP);
     tabs->setHorizontalMode(true);
@@ -29,7 +29,7 @@ MainActivity::MainActivity() {
     addTab(tabs, "cloud/tab/files"_i18n, [] { return new FileListPage(); });
     addTab(tabs, "cloud/tab/profile"_i18n, [] { return new ProfilePage(); });
 
-    this->setContentView(tabs);
+    return tabs;
 }
 
 }  // namespace cloud

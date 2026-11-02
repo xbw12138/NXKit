@@ -173,6 +173,12 @@ FileListPage::FileListPage(
 
 FileListPage::~FileListPage() { *this->alive = false; }
 
+void FileListPage::willAppear(bool resetState) {
+    brls::Box::willAppear(resetState);
+    // The page is built before login, so reload once the account is connected.
+    if (this->provider->isLoggedIn() != this->wasLoggedIn) this->refresh();
+}
+
 void FileListPage::setup() {
     this->setAxis(brls::Axis::COLUMN);
 
@@ -244,10 +250,13 @@ void FileListPage::updateBreadcrumb() {
     for (size_t i = 1; i < this->pathStack.size(); i++)
         path += " / " + this->pathStack[i].second;
     this->breadcrumb->setText(path);
+    brls::Logger::info("cloud: breadcrumb '{}'", path);
 }
 
 void FileListPage::refresh() {
-    if (!this->provider->isLoggedIn()) {
+    bool loggedIn = this->provider->isLoggedIn();
+    this->wasLoggedIn = loggedIn;
+    if (!loggedIn) {
         ((FileListDataSource*)this->dataSource)->files.clear();
         this->grid->notifyDataChanged();
         this->grid->setError("cloud/files/login_hint"_i18n);
@@ -255,10 +264,12 @@ void FileListPage::refresh() {
     }
     this->page = 0;
     this->total = -1;
+    // Invalidate any request still in flight; otherwise its stale guard leaves
+    // `loading` stuck at true and the reload never starts.
+    this->requestSeq += 1;
     this->loading = false;
     ((FileListDataSource*)this->dataSource)->files.clear();
-    this->grid->notifyDataChanged();
-    this->grid->showSkeleton(10);
+    this->grid->reloadData();
     this->loadNextPage();
 }
 
@@ -271,17 +282,21 @@ void FileListPage::loadNextPage() {
     this->loading = true;
     int nextPage = this->page + 1;
     std::string dirId = this->pathStack.back().first;
+    uint64_t seq = this->requestSeq;
 
     this->provider->listFiles(
         dirId, nextPage, kPageSize,
-        [this, alive = this->alive, dirId](const std::vector<DriveFile>& files,
-                                           int total,
-                                           const std::string& error) {
-            brls::sync([this, alive, dirId, files, total, error] {
+        [this, alive = this->alive, dirId, seq](
+            const std::vector<DriveFile>& files, int total,
+            const std::string& error) {
+            brls::sync([this, alive, dirId, seq, files, total, error] {
                 if (!*alive) return;
-                // Stale response after navigating away.
+                // Stale response after navigating away or reloading.
+                if (seq != this->requestSeq) return;
                 if (dirId != this->pathStack.back().first) return;
                 this->loading = false;
+                brls::Logger::info("cloud: {} got {} entries, total {}", dirId,
+                                   files.size(), total);
                 this->applyFiles(files, total, this->page == 0, error);
             });
         });
@@ -309,12 +324,17 @@ void FileListPage::applyFiles(const std::vector<DriveFile>& files, int total,
     if (source->files.empty())
         this->grid->setEmpty(this->pickerMode ? "cloud/files/empty_picker"_i18n
                                               : "cloud/files/empty"_i18n);
+    else if (firstPage)
+        // notifyDataChanged() does not rebind existing cells, so a new folder
+        // (or a reload of the same folder) needs a full rebuild.
+        this->grid->reloadData();
     else
         this->grid->notifyDataChanged();
 }
 
 void FileListPage::enterFolder(const std::string& dirId,
                                const std::string& name) {
+    brls::Logger::info("cloud: enter folder '{}' ({})", name, dirId);
     this->pathStack.emplace_back(dirId, name);
     this->updateBreadcrumb();
     this->refresh();

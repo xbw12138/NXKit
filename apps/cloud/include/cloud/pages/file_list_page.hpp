@@ -30,6 +30,8 @@ public:
                                     const std::string& dirName)> onPick);
     ~FileListPage() override;
 
+    void willAppear(bool resetState = false) override;
+
     /// Opens the item at `index` (called by the data source).
     void openItem(size_t index);
     /// Shows the actions menu for the item at `index` (X button).
@@ -67,6 +69,10 @@ private:
     int page = 0;
     int total = -1;
     bool loading = false;
+    /// Login state at the last refresh, used to reload after signing in.
+    bool wasLoggedIn = false;
+    /// Incremented on every refresh so in-flight responses can be discarded.
+    uint64_t requestSeq = 0;
 };
 
 }  // namespace cloud

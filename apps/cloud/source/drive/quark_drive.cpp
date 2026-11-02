@@ -332,7 +332,7 @@ void QuarkDrive::listFiles(
                      DriveFile file;
                      file.id = item.value("fid", "");
                      file.name = item.value("file_name", "");
-                     file.isDir = item.value("file", true);
+                     file.isDir = item.value("dir", false);
                      file.size = item.value("size", (uint64_t)0);
                      file.updatedAt = item.value("updated_at", (int64_t)0);
                      file.category = item.value("category", 0);

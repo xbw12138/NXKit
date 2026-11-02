@@ -30,7 +30,9 @@ private:
 
 }  // namespace
 
-LoginPage::LoginPage() {
+LoginPage::LoginPage() {}
+
+brls::View* LoginPage::createContentView() {
     brls::Box* box = new brls::Box(brls::Axis::COLUMN);
     box->setGrow(1);
     box->setAlignItems(brls::AlignItems::CENTER);
@@ -46,8 +48,8 @@ LoginPage::LoginPage() {
     this->qrView->setOnRefresh([this] { this->requestQr(); });
     box->addView(this->qrView);
 
-    this->setContentView(box);
     this->requestQr();
+    return box;
 }
 
 LoginPage::~LoginPage() {

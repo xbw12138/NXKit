@@ -20,6 +20,8 @@ public:
     LoginPage();
     ~LoginPage() override;
 
+    brls::View* createContentView() override;
+
     /// Called by the polling task, public for that reason only.
     void checkQr();
 

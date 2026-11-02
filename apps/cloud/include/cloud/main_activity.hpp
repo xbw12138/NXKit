@@ -10,7 +10,7 @@ namespace cloud {
 
 class MainActivity : public brls::Activity {
 public:
-    MainActivity();
+    brls::View* createContentView() override;
 };
 
 }  // namespace cloud

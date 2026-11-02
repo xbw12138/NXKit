@@ -2,13 +2,31 @@
 
 #include <sys/stat.h>
 
+#ifndef __SWITCH__
+#include <limits.h>
+#include <mach-o/dyld.h>
+
+// GLFW chdir()s into the Resources directory on macOS once the app starts,
+// so resolve the data directory against the executable instead of the cwd.
+static std::string executableDirectory() {
+    char raw[PATH_MAX];
+    uint32_t size = sizeof(raw);
+    if (_NSGetExecutablePath(raw, &size) == 0) {
+        std::string path = raw;
+        size_t slash = path.find_last_of('/');
+        if (slash != std::string::npos) return path.substr(0, slash);
+    }
+    return ".";
+}
+#endif
+
 namespace nxkit {
 
 std::string dataDirectory() {
 #ifdef __SWITCH__
     return "sdmc:/switch/nxkit/";
 #else
-    return "./nxkit_data/";
+    return executableDirectory() + "/nxkit_data/";
 #endif
 }
 
