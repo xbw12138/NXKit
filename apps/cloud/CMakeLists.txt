@@ -13,4 +13,5 @@ nxkit_add_app(cloud
         source/pages/profile_page.cpp
         source/pages/player_page.cpp
         source/pages/image_viewer.cpp
+        source/ui/cloud_empty_view.cpp
         )

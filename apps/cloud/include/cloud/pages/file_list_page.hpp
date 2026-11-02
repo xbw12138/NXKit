@@ -19,6 +19,8 @@ class RecyclingGridDataSource;
 
 namespace cloud {
 
+class CloudEmptyView;
+
 /// Browses a provider's directories. In picker mode only folders are shown
 /// and Y picks the current directory (used by "move to...").
 class FileListPage : public brls::Box {
@@ -46,8 +48,19 @@ private:
     void applyFiles(const std::vector<DriveFile>& files, int total,
                     bool firstPage, const std::string& error);
     void updateBreadcrumb();
+    void updateSubtitle();
+
+    /// Replaces the list with one of the empty states.
+    void showLoginState();
+    void showEmptyState();
+    void showErrorState(const std::string& error);
+    /// Shows the list again and restores focus if needed.
+    void showGrid();
+    /// True when `view` is the given ancestor or one of its descendants.
+    static bool isFocusWithin(brls::View* view, brls::View* ancestor);
 
     void promptMakeDir();
+    void pickCurrentDirectory();
     void promptRename(const DriveFile& file);
     void confirmDelete(const DriveFile& file);
     void pickMoveTarget(const DriveFile& file);
@@ -63,7 +76,9 @@ private:
 
     RecyclingGrid* grid = nullptr;
     RecyclingGridDataSource* dataSource = nullptr;
+    CloudEmptyView* emptyView = nullptr;
     brls::Label* breadcrumb = nullptr;
+    brls::Label* subtitleLabel = nullptr;
     brls::Label* hintLabel = nullptr;
 
     int page = 0;

@@ -8,7 +8,9 @@
 
 #include "cloud/drive/drive_manager.hpp"
 #include "cloud/pages/image_viewer.hpp"
+#include "cloud/pages/login_page.hpp"
 #include "cloud/pages/player_page.hpp"
+#include "cloud/ui/cloud_empty_view.hpp"
 #include "nxkit/ui/recycling_grid.hpp"
 
 using namespace brls::literals;
@@ -54,59 +56,218 @@ static std::string typeTagOf(const DriveFile& file) {
 }
 
 // -----------------------------------------------------------------------------
+// Row visuals
+// -----------------------------------------------------------------------------
+
+static NVGcolor typeColor(bool isDir, MediaKind kind) {
+    if (isDir) return nvgRGB(0, 166, 118);
+    switch (kind) {
+        case MediaKind::Video: return nvgRGB(255, 132, 76);
+        case MediaKind::Audio: return nvgRGB(150, 120, 255);
+        case MediaKind::Image: return nvgRGB(64, 150, 255);
+        default: return nvgRGB(140, 150, 162);
+    }
+}
+
+/// Solid rounded square with a white glyph for the file type.
+class FileTypeBadge : public brls::View {
+public:
+    void setKind(bool dir, MediaKind value) {
+        this->isDir = dir;
+        this->kind = value;
+    }
+
+    void draw(NVGcontext* vg, float x, float y, float width, float height,
+              brls::Style style, brls::FrameContext* ctx) override {
+        if (width <= 0 || height <= 0) return;
+
+        nvgBeginPath(vg);
+        nvgRoundedRect(vg, x, y, width, height, 12);
+        nvgFillColor(vg, this->a(typeColor(this->isDir, this->kind)));
+        nvgFill(vg);
+
+        NVGcolor glyph = this->RGBA(255, 255, 255, 235);
+        float cx = x + width * 0.5f;
+        float cy = y + height * 0.5f;
+
+        if (this->isDir) {
+            nvgBeginPath(vg);
+            nvgRoundedRect(vg, cx - 9, cy - 4, 18, 12, 2.5f);
+            nvgStrokeColor(vg, glyph);
+            nvgStrokeWidth(vg, 1.8f);
+            nvgStroke(vg);
+
+            nvgBeginPath(vg);
+            nvgRoundedRect(vg, cx - 9, cy - 9, 9, 6, 1.5f);
+            nvgFillColor(vg, glyph);
+            nvgFill(vg);
+            return;
+        }
+
+        switch (this->kind) {
+            case MediaKind::Video:
+                nvgBeginPath(vg);
+                nvgMoveTo(vg, cx - 5, cy - 8);
+                nvgLineTo(vg, cx - 5, cy + 8);
+                nvgLineTo(vg, cx + 8, cy);
+                nvgClosePath(vg);
+                nvgFillColor(vg, glyph);
+                nvgFill(vg);
+                break;
+
+            case MediaKind::Audio:
+                nvgBeginPath(vg);
+                nvgCircle(vg, cx - 3, cy + 6, 3.6f);
+                nvgFillColor(vg, glyph);
+                nvgFill(vg);
+                nvgBeginPath(vg);
+                nvgRect(vg, cx - 0.5f, cy - 8, 2.2f, 14);
+                nvgFillColor(vg, glyph);
+                nvgFill(vg);
+                break;
+
+            case MediaKind::Image:
+                nvgBeginPath(vg);
+                nvgRoundedRect(vg, cx - 9, cy - 8, 18, 16, 2.5f);
+                nvgStrokeColor(vg, glyph);
+                nvgStrokeWidth(vg, 1.8f);
+                nvgStroke(vg);
+                nvgBeginPath(vg);
+                nvgCircle(vg, cx - 4, cy - 3, 1.8f);
+                nvgFillColor(vg, glyph);
+                nvgFill(vg);
+                nvgBeginPath(vg);
+                nvgMoveTo(vg, cx - 8, cy + 6);
+                nvgLineTo(vg, cx - 1, cy);
+                nvgLineTo(vg, cx + 8, cy + 6);
+                nvgStrokeColor(vg, glyph);
+                nvgStrokeWidth(vg, 1.8f);
+                nvgStroke(vg);
+                break;
+
+            default:
+                nvgBeginPath(vg);
+                nvgRoundedRect(vg, cx - 7, cy - 9, 14, 18, 2.5f);
+                nvgStrokeColor(vg, glyph);
+                nvgStrokeWidth(vg, 1.8f);
+                nvgStroke(vg);
+                nvgBeginPath(vg);
+                nvgMoveTo(vg, cx - 3, cy - 2);
+                nvgLineTo(vg, cx + 3, cy - 2);
+                nvgMoveTo(vg, cx - 3, cy + 2);
+                nvgLineTo(vg, cx + 3, cy + 2);
+                nvgStrokeColor(vg, glyph);
+                nvgStrokeWidth(vg, 1.5f);
+                nvgStroke(vg);
+                break;
+        }
+    }
+
+private:
+    bool isDir = false;
+    MediaKind kind = MediaKind::None;
+};
+
+/// Small accent chevron shown at the end of directory rows.
+class ChevronView : public brls::View {
+public:
+    void draw(NVGcontext* vg, float x, float y, float width, float height,
+              brls::Style style, brls::FrameContext* ctx) override {
+        if (width <= 0 || height <= 0) return;
+        float cx = x + width * 0.5f;
+        float cy = y + height * 0.5f;
+        nvgBeginPath(vg);
+        nvgMoveTo(vg, cx - 4, cy - 8);
+        nvgLineTo(vg, cx + 4, cy);
+        nvgLineTo(vg, cx - 4, cy + 8);
+        nvgStrokeColor(vg, this->a(brls::Application::getTheme()["brls/accent"]));
+        nvgStrokeWidth(vg, 2.2f);
+        nvgStroke(vg);
+    }
+};
+
+// -----------------------------------------------------------------------------
 // FileRowCell
 // -----------------------------------------------------------------------------
 
 class FileRowCell : public RecyclingGridItem {
 public:
     explicit FileRowCell(FileListPage* page) : page(page) {
+        brls::Theme theme = brls::Application::getTheme();
+
         this->setAxis(brls::Axis::ROW);
         this->setAlignItems(brls::AlignItems::CENTER);
         this->setFocusable(true);
-        this->setPaddingLeft(16);
-        this->setPaddingRight(16);
+        this->setPadding(0, 16, 0, 14);
+        this->setCornerRadius(12);
+        this->setHighlightCornerRadius(12);
+        this->setBackgroundColor(theme["color/grey_1"]);
+        this->setBorderColor(theme["brls/header/border"]);
+        this->setBorderThickness(1);
 
-        this->typeLabel = new brls::Label();
-        this->typeLabel->setWidth(96);
-        this->typeLabel->setFontSize(16);
-        this->typeLabel->setHorizontalAlign(brls::HorizontalAlign::CENTER);
-        this->typeLabel->setMarginRight(12);
-        this->addView(this->typeLabel);
+        this->badge = new FileTypeBadge();
+        this->badge->setDimensions(44, 44);
+        this->badge->setMarginRight(14);
+        this->addView(this->badge);
+
+        brls::Box* textBox = new brls::Box(brls::Axis::COLUMN);
+        textBox->setGrow(1);
+        textBox->setJustifyContent(brls::JustifyContent::CENTER);
+        this->addView(textBox);
 
         this->nameLabel = new brls::Label();
-        this->nameLabel->setGrow(1);
-        this->nameLabel->setFontSize(20);
-        this->addView(this->nameLabel);
+        this->nameLabel->setFontSize(19);
+        this->nameLabel->setSingleLine(true);
+        this->nameLabel->setAnimated(true);
+        this->nameLabel->setTextColor(theme["brls/text"]);
+        textBox->addView(this->nameLabel);
 
-        this->sizeLabel = new brls::Label();
-        this->sizeLabel->setWidth(120);
-        this->sizeLabel->setFontSize(16);
-        this->sizeLabel->setHorizontalAlign(brls::HorizontalAlign::RIGHT);
-        this->sizeLabel->setMarginRight(16);
-        this->addView(this->sizeLabel);
+        this->metaLabel = new brls::Label();
+        this->metaLabel->setFontSize(13);
+        this->metaLabel->setTextColor(theme["font/grey"]);
+        this->metaLabel->setMarginTop(3);
+        textBox->addView(this->metaLabel);
 
-        this->dateLabel = new brls::Label();
-        this->dateLabel->setWidth(130);
-        this->dateLabel->setFontSize(16);
-        this->dateLabel->setHorizontalAlign(brls::HorizontalAlign::RIGHT);
-        this->addView(this->dateLabel);
+        this->chevron = new ChevronView();
+        this->chevron->setDimensions(20, 20);
+        this->chevron->setMarginLeft(10);
+        this->addView(this->chevron);
 
         // X opens the item actions menu. getIndex() resolves at press time,
         // so reused cells always act on the currently bound item.
         this->registerAction(
-            "", brls::BUTTON_X,
+            "cloud/files/more"_i18n, brls::BUTTON_X,
             [this](brls::View*) -> bool {
                 this->page->showItemActions(this->getIndex());
                 return true;
             },
-            true);
+            false);
     }
 
     void setFile(const DriveFile& file) {
-        this->typeLabel->setText(typeTagOf(file));
+        this->badge->setKind(file.isDir, file.mediaKind());
         this->nameLabel->setText(file.name);
-        this->sizeLabel->setText(file.isDir ? "-" : formatSize(file.size));
-        this->dateLabel->setText(formatDate(file.updatedAt));
+
+        std::string meta = typeTagOf(file);
+        if (!file.isDir && file.size > 0)
+            meta += "  ·  " + formatSize(file.size);
+        std::string date = formatDate(file.updatedAt);
+        if (!date.empty()) meta += "  ·  " + date;
+        this->metaLabel->setText(meta);
+
+        this->chevron->setVisibility(file.isDir ? brls::Visibility::VISIBLE
+                                                : brls::Visibility::INVISIBLE);
+        this->refreshFocusStyle();
+    }
+
+    void onFocusGained() override {
+        RecyclingGridItem::onFocusGained();
+        this->refreshFocusStyle();
+    }
+
+    void onFocusLost() override {
+        RecyclingGridItem::onFocusLost();
+        this->refreshFocusStyle();
     }
 
     static RecyclingGridItem* create(FileListPage* page) {
@@ -114,11 +275,21 @@ public:
     }
 
 private:
+    void refreshFocusStyle() {
+        brls::Theme theme = brls::Application::getTheme();
+        bool selected = this->isFocused();
+        this->setBorderColor(selected ? theme["brls/accent"]
+                                      : theme["brls/header/border"]);
+        this->setBorderThickness(selected ? 2.0f : 1.0f);
+        this->nameLabel->setTextColor(selected ? theme["brls/accent"]
+                                               : theme["brls/text"]);
+    }
+
     FileListPage* page;
-    brls::Label* typeLabel;
-    brls::Label* nameLabel;
-    brls::Label* sizeLabel;
-    brls::Label* dateLabel;
+    FileTypeBadge* badge = nullptr;
+    brls::Label* nameLabel = nullptr;
+    brls::Label* metaLabel = nullptr;
+    ChevronView* chevron = nullptr;
 };
 
 // -----------------------------------------------------------------------------
@@ -138,7 +309,7 @@ public:
         return cell;
     }
 
-    float heightForRow(RecyclingGrid*, size_t) override { return 64; }
+    float heightForRow(RecyclingGrid*, size_t) override { return 74; }
 
     void onItemSelected(RecyclingGrid*, size_t index) override {
         this->page->openItem(index);
@@ -180,33 +351,52 @@ void FileListPage::willAppear(bool resetState) {
 }
 
 void FileListPage::setup() {
+    brls::Theme theme = brls::Application::getTheme();
     this->setAxis(brls::Axis::COLUMN);
 
-    brls::Box* header = new brls::Box(brls::Axis::ROW);
-    header->setAlignItems(brls::AlignItems::CENTER);
-    header->setPadding(12, 16, 8, 16);
+    brls::Box* header = new brls::Box(brls::Axis::COLUMN);
+    header->setPadding(14, 20, 12, 20);
+    header->setLineColor(theme["brls/header/border"]);
+    header->setLineBottom(1);
+
+    brls::Box* titleRow = new brls::Box(brls::Axis::ROW);
+    titleRow->setAlignItems(brls::AlignItems::CENTER);
 
     this->breadcrumb = new brls::Label();
     this->breadcrumb->setGrow(1);
-    this->breadcrumb->setFontSize(20);
-    header->addView(this->breadcrumb);
+    this->breadcrumb->setFontSize(26);
+    this->breadcrumb->setSingleLine(true);
+    this->breadcrumb->setAnimated(true);
+    titleRow->addView(this->breadcrumb);
 
     this->hintLabel = new brls::Label();
-    this->hintLabel->setFontSize(16);
+    this->hintLabel->setFontSize(13);
+    this->hintLabel->setTextColor(theme["font/grey"]);
     this->hintLabel->setText(this->pickerMode ? "cloud/files/hint_picker"_i18n
                                               : "cloud/files/hint_browse"_i18n);
-    header->addView(this->hintLabel);
+    titleRow->addView(this->hintLabel);
+
+    header->addView(titleRow);
+
+    this->subtitleLabel = new brls::Label();
+    this->subtitleLabel->setFontSize(14);
+    this->subtitleLabel->setTextColor(theme["font/grey"]);
+    this->subtitleLabel->setMarginTop(4);
+    header->addView(this->subtitleLabel);
 
     this->addView(header);
 
     this->grid = new RecyclingGrid();
     this->grid->setGrow(1);
     this->grid->spanCount = 1;
-    this->grid->estimatedRowHeight = 72;
-    this->grid->estimatedRowSpace = 8;
-    this->grid->setPaddingBottom(16);
-    this->grid->setPaddingLeft(12);
-    this->grid->setPaddingRight(12);
+    this->grid->estimatedRowHeight = 74;
+    this->grid->estimatedRowSpace = 10;
+    this->grid->setPaddingTop(8);
+    this->grid->setPaddingBottom(20);
+    // estimatedRowSpace doubles as the right gutter in single column mode,
+    // so these paddings keep the cards symmetric.
+    this->grid->setPaddingLeft(16);
+    this->grid->setPaddingRight(6);
 
     auto* source = new FileListDataSource(this);
     this->dataSource = source;
@@ -215,6 +405,10 @@ void FileListPage::setup() {
     this->grid->onNextPage([this] { this->loadNextPage(); });
 
     this->addView(this->grid);
+
+    this->emptyView = new CloudEmptyView();
+    this->emptyView->setVisibility(brls::Visibility::GONE);
+    this->addView(this->emptyView);
 
     // B: leave the current folder first, then the page.
     this->registerAction(
@@ -226,10 +420,7 @@ void FileListPage::setup() {
         this->registerAction(
             "cloud/files/pick_here"_i18n, brls::BUTTON_Y,
             [this](brls::View*) -> bool {
-                if (this->pickCallback)
-                    this->pickCallback(this->pathStack.back().first,
-                                       this->pathStack.back().second);
-                brls::Application::popActivity();
+                this->pickCurrentDirectory();
                 return true;
             });
     } else {
@@ -246,30 +437,118 @@ void FileListPage::setup() {
 }
 
 void FileListPage::updateBreadcrumb() {
-    std::string path = "cloud/files/root"_i18n;
+    std::string path = this->pickerMode ? "cloud/files/picker_title"_i18n
+                                        : "cloud/files/root"_i18n;
     for (size_t i = 1; i < this->pathStack.size(); i++)
         path += " / " + this->pathStack[i].second;
     this->breadcrumb->setText(path);
     brls::Logger::info("cloud: breadcrumb '{}'", path);
 }
 
+void FileListPage::updateSubtitle() {
+    auto* source = (FileListDataSource*)this->dataSource;
+    size_t count = source->files.size();
+    std::string text = std::to_string(count) + " " + "cloud/files/items"_i18n;
+    if (this->total > 0 && (size_t)this->total != count)
+        text = std::to_string(count) + " / " + std::to_string(this->total) +
+               " " + "cloud/files/items"_i18n;
+    this->subtitleLabel->setText(text);
+}
+
+bool FileListPage::isFocusWithin(brls::View* view, brls::View* ancestor) {
+    for (brls::View* current = view; current; current = current->getParent())
+        if (current == ancestor) return true;
+    return false;
+}
+
+void FileListPage::showGrid() {
+    this->emptyView->setVisibility(brls::Visibility::GONE);
+    this->grid->setVisibility(brls::Visibility::VISIBLE);
+}
+
+void FileListPage::showLoginState() {
+    this->grid->setVisibility(brls::Visibility::GONE);
+    this->emptyView->setVisibility(brls::Visibility::VISIBLE);
+    this->emptyView->setContent(CloudEmptyView::Mode::Login,
+                                "cloud/files/login_title"_i18n,
+                                "cloud/files/login_desc"_i18n);
+    this->emptyView->setAction(
+        "cloud/files/login_action"_i18n, [] {
+            brls::Application::pushActivity(new LoginPage());
+        });
+    this->subtitleLabel->setText("cloud/files/not_signed_in"_i18n);
+
+    // Move focus away from a list that is about to disappear.
+    if (isFocusWithin(brls::Application::getCurrentFocus(), this->grid)) {
+        if (auto* target = this->emptyView->focusTarget())
+            brls::Application::giveFocus(target);
+    }
+}
+
+void FileListPage::showEmptyState() {
+    this->grid->setVisibility(brls::Visibility::GONE);
+    this->emptyView->setVisibility(brls::Visibility::VISIBLE);
+
+    if (this->pickerMode) {
+        this->emptyView->setContent(
+            CloudEmptyView::Mode::Empty,
+            "cloud/files/empty_picker_title"_i18n,
+            "cloud/files/empty_picker_desc"_i18n);
+        this->emptyView->setAction("cloud/files/pick_here"_i18n,
+                                   [this] { this->pickCurrentDirectory(); });
+    } else {
+        this->emptyView->setContent(CloudEmptyView::Mode::Empty,
+                                    "cloud/files/empty_title"_i18n,
+                                    "cloud/files/empty_desc"_i18n);
+        this->emptyView->setAction("cloud/files/mkdir"_i18n,
+                                   [this] { this->promptMakeDir(); });
+    }
+    this->updateSubtitle();
+
+    if (isFocusWithin(brls::Application::getCurrentFocus(), this->grid)) {
+        if (auto* target = this->emptyView->focusTarget())
+            brls::Application::giveFocus(target);
+    }
+}
+
+void FileListPage::showErrorState(const std::string& error) {
+    this->grid->setVisibility(brls::Visibility::GONE);
+    this->emptyView->setVisibility(brls::Visibility::VISIBLE);
+    this->emptyView->setContent(
+        CloudEmptyView::Mode::Error, "cloud/files/error_title"_i18n,
+        error.empty() ? "cloud/files/error_desc"_i18n : error);
+    this->emptyView->setAction("cloud/files/retry"_i18n,
+                               [this] { this->refresh(); });
+    this->subtitleLabel->setText("");
+
+    if (isFocusWithin(brls::Application::getCurrentFocus(), this->grid)) {
+        if (auto* target = this->emptyView->focusTarget())
+            brls::Application::giveFocus(target);
+    }
+}
+
 void FileListPage::refresh() {
     bool loggedIn = this->provider->isLoggedIn();
     this->wasLoggedIn = loggedIn;
-    if (!loggedIn) {
-        ((FileListDataSource*)this->dataSource)->files.clear();
-        this->grid->notifyDataChanged();
-        this->grid->setError("cloud/files/login_hint"_i18n);
-        return;
-    }
+
+    auto* source = (FileListDataSource*)this->dataSource;
+    source->files.clear();
     this->page = 0;
     this->total = -1;
+
+    if (!loggedIn) {
+        this->grid->reloadData();
+        this->showLoginState();
+        return;
+    }
+
     // Invalidate any request still in flight; otherwise its stale guard leaves
     // `loading` stuck at true and the reload never starts.
     this->requestSeq += 1;
     this->loading = false;
-    ((FileListDataSource*)this->dataSource)->files.clear();
+    this->showGrid();
     this->grid->reloadData();
+    this->subtitleLabel->setText("cloud/files/loading"_i18n);
     this->loadNextPage();
 }
 
@@ -307,7 +586,7 @@ void FileListPage::applyFiles(const std::vector<DriveFile>& files, int total,
     auto* source = (FileListDataSource*)this->dataSource;
     if (!error.empty()) {
         if (firstPage)
-            this->grid->setError(error);
+            this->showErrorState(error);
         else
             brls::Application::notify(error);
         return;
@@ -321,15 +600,37 @@ void FileListPage::applyFiles(const std::vector<DriveFile>& files, int total,
         source->files.push_back(file);
     }
 
-    if (source->files.empty())
-        this->grid->setEmpty(this->pickerMode ? "cloud/files/empty_picker"_i18n
-                                              : "cloud/files/empty"_i18n);
-    else if (firstPage)
+    if (source->files.empty()) {
+        this->showEmptyState();
+        return;
+    }
+
+    // Remember whether focus sat inside the empty state so it can be handed
+    // back to the list once the cells exist.
+    bool focusWasEmpty = isFocusWithin(brls::Application::getCurrentFocus(),
+                                       this->emptyView);
+    this->showGrid();
+    this->updateSubtitle();
+
+    if (firstPage)
         // notifyDataChanged() does not rebind existing cells, so a new folder
         // (or a reload of the same folder) needs a full rebuild.
         this->grid->reloadData();
     else
         this->grid->notifyDataChanged();
+
+    if (focusWasEmpty) {
+        brls::Application::giveFocus(this->grid);
+        // The first layout of a previously hidden grid happens after this
+        // callback, so retry once if focus is still on the hidden button.
+        auto alive = this->alive;
+        brls::delay(150, [this, alive] {
+            if (!*alive) return;
+            if (isFocusWithin(brls::Application::getCurrentFocus(),
+                              this->emptyView))
+                brls::Application::giveFocus(this->grid);
+        });
+    }
 }
 
 void FileListPage::enterFolder(const std::string& dirId,
@@ -424,6 +725,13 @@ void FileListPage::promptMakeDir() {
                 });
         },
         "cloud/files/mkdir"_i18n, "", 64);
+}
+
+void FileListPage::pickCurrentDirectory() {
+    if (this->pickCallback)
+        this->pickCallback(this->pathStack.back().first,
+                           this->pathStack.back().second);
+    brls::Application::popActivity();
 }
 
 void FileListPage::promptRename(const DriveFile& file) {

@@ -145,7 +145,9 @@ ThemeValues::ThemeValues(std::initializer_list<std::pair<std::string, NVGcolor>>
 
 void ThemeValues::addColor(std::string name, NVGcolor color)
 {
-    this->values.insert(std::make_pair(name, color));
+    // Assign instead of insert so apps can override the built-in palette
+    // (e.g. brls/accent) with their own brand colors.
+    this->values[name] = color;
 }
 
 NVGcolor ThemeValues::getColor(std::string name)
