@@ -6,6 +6,8 @@
 
 #include <borealis/core/task.hpp>
 
+#include <cstdio>
+
 #include "cloud/drive/drive_manager.hpp"
 #include "nxkit/ui/qr_login_view.hpp"
 
@@ -16,6 +18,18 @@ namespace cloud {
 namespace {
 
 const int kPollPeriodMs = 1500;
+
+// Temporary on-device diagnostics, same file the QR view logs to.
+void logDebug(const char* line) {
+#ifdef __SWITCH__
+    FILE* file = fopen("sdmc:/switch/nxkit/qr_debug.log", "a");
+#else
+    FILE* file = fopen("/tmp/qr_debug.log", "a");
+#endif
+    if (!file) return;
+    fprintf(file, "%s\n", line);
+    fclose(file);
+}
 
 class QrPollTask : public brls::RepeatingTask {
 public:
@@ -69,8 +83,8 @@ void LoginPage::requestQr() {
                                                   const std::string& error) {
         brls::sync([this, alive, content, token, error] {
             if (!*alive) return;
-            if (!error.empty()) {
-                this->qrView->setStatus(error);
+            if (!error.empty() || content.empty()) {
+                this->qrView->setStatus(error.empty() ? "cloud/login/failed"_i18n : error);
                 this->qrView->setRefreshVisible(true);
                 return;
             }
@@ -120,10 +134,12 @@ void LoginPage::checkQr() {
                         this->qrView->setRefreshVisible(true);
                         break;
                     case QrStatus::Success:
+                        logDebug("qr: success");
                         this->finished = true;
                         this->stopPolling();
                         this->qrTokenValue.clear();
                         brls::Application::notify("cloud/login/success"_i18n);
+                        logDebug("qr: popping");
                         brls::Application::popActivity();
                         break;
                 }

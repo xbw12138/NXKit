@@ -32,7 +32,10 @@ HttpResult fromResponse(const cpr::Response& response) {
     }
 
     if (response.error) {
+        result.code  = static_cast<int>(response.error.code);
         result.error = response.error.message;
+        if (result.error.empty())
+            result.error = "curl error " + std::to_string(result.code);
         return result;
     }
 
@@ -70,6 +73,42 @@ std::string mergeCookies(const std::string& existing,
 nlohmann::json HttpResult::json() const {
     nlohmann::json parsed = nlohmann::json::parse(body, nullptr, false);
     return parsed;
+}
+
+namespace {
+
+std::string& defaultCaBundleStorage() {
+#ifdef __SWITCH__
+    // No system trust store on Switch; use the bundle baked into romfs.
+    static std::string path = "romfs:/cacert.pem";
+#else
+    static std::string path;
+#endif
+    return path;
+}
+
+}  // namespace
+
+const std::string& HttpClient::sharedCaBundle() { return defaultCaBundleStorage(); }
+
+void HttpClient::setDefaultCaBundle(const std::string& path) { defaultCaBundleStorage() = path; }
+
+cpr::SslOptions HttpClient::sslOptions() const {
+    cpr::SslOptions options;
+    options.verify_host = verifySsl;
+    options.verify_peer = verifySsl;
+    // Only hand libcurl a CA file when we actually verify, otherwise an
+    // unreadable romfs path would make the request fail for no reason.
+    if (verifySsl) options.ca_info = caBundlePath();
+    return options;
+}
+
+void HttpClient::applyCaBundle(cpr::Session& session) {
+    std::string path = sharedCaBundle();
+    if (path.empty()) return;
+    cpr::SslOptions options;
+    options.ca_info = path;
+    session.SetOption(options);
 }
 
 void HttpClient::setBaseUrl(const std::string& url) {
@@ -119,8 +158,8 @@ cpr::Payload HttpClient::toPayload(const Query& form) {
 
 HttpResult HttpClient::get(const std::string& path, const Query& query, int timeout) const {
     cpr::Response response =
-        cpr::Get(cpr::Url{urlFor(path)}, toParameters(query), headers(), redirect(),
-                 cpr::VerifySsl{verifySsl}, cpr::Timeout{timeoutFor(timeout)});
+        cpr::Get(cpr::Url{urlFor(path)}, toParameters(query), headers(), redirect(), sslOptions(),
+                 cpr::Timeout{timeoutFor(timeout)});
     return fromResponse(response);
 }
 
@@ -128,7 +167,7 @@ HttpResult HttpClient::post(const std::string& path, const Query& query, const Q
                             int timeout) const {
     cpr::Response response =
         cpr::Post(cpr::Url{urlFor(path)}, toParameters(query), headers(), toPayload(form),
-                  redirect(), cpr::VerifySsl{verifySsl}, cpr::Timeout{timeoutFor(timeout)});
+                  redirect(), sslOptions(), cpr::Timeout{timeoutFor(timeout)});
     return fromResponse(response);
 }
 
@@ -139,22 +178,22 @@ HttpResult HttpClient::postJson(const std::string& path, const Query& query,
 
     cpr::Response response =
         cpr::Post(cpr::Url{urlFor(path)}, toParameters(query), header, cpr::Body{body.dump()},
-                  redirect(), cpr::VerifySsl{verifySsl}, cpr::Timeout{timeoutFor(timeout)});
+                  redirect(), sslOptions(), cpr::Timeout{timeoutFor(timeout)});
     return fromResponse(response);
 }
 
 void HttpClient::getAsync(const std::string& path, const Query& query,
                           std::function<void(const HttpResult&)> callback, int timeout) const {
     cpr::GetCallback([callback](const cpr::Response& response) { callback(fromResponse(response)); },
-                     cpr::Url{urlFor(path)}, toParameters(query), headers(), redirect(),
-                     cpr::VerifySsl{verifySsl}, cpr::Timeout{timeoutFor(timeout)});
+                     cpr::Url{urlFor(path)}, toParameters(query), headers(), redirect(), sslOptions(),
+                     cpr::Timeout{timeoutFor(timeout)});
 }
 
 void HttpClient::postAsync(const std::string& path, const Query& query, const Query& form,
                            std::function<void(const HttpResult&)> callback, int timeout) const {
     cpr::PostCallback([callback](const cpr::Response& response) { callback(fromResponse(response)); },
                       cpr::Url{urlFor(path)}, toParameters(query), headers(), toPayload(form),
-                      redirect(), cpr::VerifySsl{verifySsl}, cpr::Timeout{timeoutFor(timeout)});
+                      redirect(), sslOptions(), cpr::Timeout{timeoutFor(timeout)});
 }
 
 void HttpClient::postJsonAsync(const std::string& path, const Query& query,
@@ -165,7 +204,7 @@ void HttpClient::postJsonAsync(const std::string& path, const Query& query,
 
     cpr::PostCallback([callback](const cpr::Response& response) { callback(fromResponse(response)); },
                       cpr::Url{urlFor(path)}, toParameters(query), header, cpr::Body{body.dump()},
-                      redirect(), cpr::VerifySsl{verifySsl}, cpr::Timeout{timeoutFor(timeout)});
+                      redirect(), sslOptions(), cpr::Timeout{timeoutFor(timeout)});
 }
 
 }  // namespace nxkit

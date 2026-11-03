@@ -189,6 +189,9 @@ void MPVCore::init() {
     mpv_set_option_string(mpv, "vd-lavc-threads", "4");
     // This should fix random crash, but I don't know why.
     mpv_set_option_string(mpv, "opengl-glfinish", "yes");
+    // On-device diagnostics: mpv logs end up next to the app config.
+    mpv_set_option_string(mpv, "log-file",
+                          fmt::format("{}mpv.log", confDir).c_str());
 #endif
     mpv_set_option_string(mpv, "demuxer-lavf-analyzeduration", "0.4");
     mpv_set_option_string(mpv, "demuxer-lavf-probescore", "24");
@@ -713,6 +716,10 @@ void MPVCore::setUrl(const std::string& url, const std::string& extra,
     } else {
         command_async("loadfile", url, method, "0", extra);
     }
+}
+
+void MPVCore::setHttpHeaders(const std::string& headers) {
+    command_async("set", "http-header-fields", headers);
 }
 
 void MPVCore::setVolume(int64_t value) {

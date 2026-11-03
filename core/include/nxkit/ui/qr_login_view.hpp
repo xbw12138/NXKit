@@ -9,9 +9,9 @@
 #include <functional>
 #include <string>
 
-class SVGImage;
-
 namespace nxkit {
+
+class QrCodeView;
 
 /// Shows a QR code, a status line and a refresh button.
 ///
@@ -42,7 +42,7 @@ public:
     static brls::View* create() { return new QRLoginView(); }
 
 private:
-    SVGImage* qrImage = nullptr;
+    QrCodeView* qrImage = nullptr;
     brls::Label* statusLabel = nullptr;
     brls::Button* refreshButton = nullptr;
     std::function<void()> onRefresh;

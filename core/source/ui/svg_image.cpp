@@ -75,7 +75,12 @@ void SVGImage::updateBitmap() {
 
     float width  = this->getWidth() * brls::Application::windowScale;
     float height = this->getHeight() * brls::Application::windowScale;
-    auto bitmap  = this->document->renderToBitmap(width, height);
+    // Layout may not have run yet (e.g. content set from a network callback);
+    // draw() retries on the next frame once dimensions are known.
+    if (width <= 0 || height <= 0) return;
+
+    auto bitmap = this->document->renderToBitmap(width, height);
+    if (bitmap.width() <= 0 || bitmap.height() <= 0) return;
     bitmap.convertToRGBA();
     NVGcontext* vg = brls::Application::getNVGContext();
     int tex        = nvgCreateImageRGBA(vg, bitmap.width(), bitmap.height(), 0,
@@ -93,6 +98,7 @@ brls::View* SVGImage::create() { return new SVGImage(); }
 
 void SVGImage::draw(NVGcontext* vg, float x, float y, float width, float height,
                     brls::Style style, brls::FrameContext* ctx) {
+    if (this->texture == 0 && this->document) this->updateBitmap();
     if (this->texture == 0) return;
 
     nvgSave(vg);

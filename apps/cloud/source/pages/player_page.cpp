@@ -4,6 +4,8 @@
 
 #include "cloud/pages/player_page.hpp"
 
+#include <cstdio>
+
 #include "nxkit/utils/number_helper.hpp"
 
 #ifdef NXKIT_WITH_MPV
@@ -13,6 +15,22 @@
 using namespace brls::literals;
 
 namespace cloud {
+
+namespace {
+
+// Temporary on-device diagnostics, same file the QR view logs to.
+void logDebug(const std::string& line) {
+#ifdef __SWITCH__
+    FILE* file = fopen("sdmc:/switch/nxkit/qr_debug.log", "a");
+#else
+    FILE* file = fopen("/tmp/qr_debug.log", "a");
+#endif
+    if (!file) return;
+    fprintf(file, "%s\n", line.c_str());
+    fclose(file);
+}
+
+}  // namespace
 
 /// mpv wants extra headers as a single comma separated list, providers return
 /// them CRLF separated (as they would appear in a request).
@@ -38,6 +56,10 @@ PlayerPage::PlayerPage(std::shared_ptr<DriveProvider> provider,
       isAudio(isAudio) {
     this->setAxis(brls::Axis::COLUMN);
     this->setGrow(1);
+    // Take focus (and hide the highlight box) so the file list cell that
+    // opened us does not keep drawing its focus ring over the video.
+    this->setFocusable(true);
+    this->setHideHighlight(true);
 
 #ifdef NXKIT_WITH_MPV
     this->mpvAvailable = true;
@@ -140,7 +162,8 @@ PlayerPage::PlayerPage(std::shared_ptr<DriveProvider> provider,
             auto& mpv = nxkit::MPVCore::instance();
             mpv.stop();
             mpv.reset();
-            return false;  // let the activity pop
+            brls::Application::popActivity();
+            return true;
         },
         true);
 
@@ -186,6 +209,7 @@ void PlayerPage::play() {
         return;
     }
     // Prefer transcoded streams (no special headers required).
+    logDebug("player: requesting streams");
     this->provider->videoStreams(
         this->file.id,
         [this, alive = this->alive](const std::vector<VideoStream>& streams,
@@ -193,6 +217,8 @@ void PlayerPage::play() {
                                     const std::string& error) {
             brls::sync([this, alive, streams, def, error] {
                 if (!*alive) return;
+                logDebug("player: streams n=" + std::to_string(streams.size()) +
+                         " err=" + error);
                 if (!error.empty() || streams.empty()) {
                     this->playOriginal();
                     return;
@@ -212,6 +238,7 @@ void PlayerPage::play() {
 }
 
 void PlayerPage::playOriginal() {
+    logDebug("player: requesting download info");
     this->provider->downloadInfo(
         this->file.id,
         [this, alive = this->alive](const std::string& url,
@@ -219,6 +246,8 @@ void PlayerPage::playOriginal() {
                                     const std::string& error) {
             brls::sync([this, alive, url, headers, error] {
                 if (!*alive) return;
+                logDebug("player: download info err=" + error +
+                         " urlLen=" + std::to_string(url.size()));
                 if (!error.empty() || url.empty()) {
                     this->loadingLabel->setText(
                         error.empty() ? "cloud/player/no_stream"_i18n : error);
@@ -231,17 +260,20 @@ void PlayerPage::playOriginal() {
 
 void PlayerPage::startUrl(const std::string& url, const std::string& headers) {
 #ifdef NXKIT_WITH_MPV
+    logDebug("player: startUrl hdr=" + std::to_string(headers.size()));
     auto& mpv = nxkit::MPVCore::instance();
     mpv.stop();
     mpv.reset();
-    if (headers.empty())
-        mpv.setUrl(url);
-    else
-        mpv.setUrl(url, "http-header-fields=" + headersToMpv(headers));
+    if (!headers.empty()) mpv.setHttpHeaders(headersToMpv(headers));
+    mpv.setUrl(url);
+#else
+    (void)url;
+    (void)headers;
 #endif
 }
 
 void PlayerPage::onMpvEvent(int event) {
+    logDebug("player: mpv event " + std::to_string(event));
 #ifdef NXKIT_WITH_MPV
     using nxkit::MpvEventEnum;
     switch ((MpvEventEnum)event) {

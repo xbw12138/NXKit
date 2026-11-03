@@ -7,47 +7,130 @@
 #include <borealis/views/button.hpp>
 #include <qrcodegen.hpp>
 
-#include "nxkit/ui/svg_image.hpp"
+#include <algorithm>
+#include <cstdio>
+#include <stdexcept>
+#include <vector>
 
 namespace nxkit {
 
-static std::string qrToSvg(const std::string& content) {
-    const int border = 4;
-    const int scale = 8;
-
-    qrcodegen::QrCode qr = qrcodegen::QrCode::encodeText(
-        content.c_str(), qrcodegen::QrCode::Ecc::MEDIUM);
-    int size = qr.getSize();
-    int pixels = (size + border * 2) * scale;
-
-    std::string svg;
-    svg.reserve(pixels * pixels);
-    svg += "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 ";
-    svg += std::to_string(pixels);
-    svg += " ";
-    svg += std::to_string(pixels);
-    svg += "\"><rect width=\"" + std::to_string(pixels) + "\" height=\"" +
-           std::to_string(pixels) + "\" fill=\"#FFFFFF\"/><path d=\"";
-    for (int y = 0; y < size; y++) {
-        for (int x = 0; x < size; x++) {
-            if (!qr.getModule(x, y)) continue;
-            int px = (x + border) * scale;
-            int py = (y + border) * scale;
-            svg += "M" + std::to_string(px) + "," + std::to_string(py) + "h" +
-                   std::to_string(scale) + "v" + std::to_string(scale) + "h-" +
-                   std::to_string(scale) + "z";
-        }
-    }
-    svg += "\" fill=\"#000000\"/></svg>";
-    return svg;
+// Temporary on-device diagnostics: borealis logs are unavailable on Switch.
+static void qrDebugLog(const std::string& line) {
+#ifdef __SWITCH__
+    FILE* file = fopen("sdmc:/switch/nxkit/qr_debug.log", "a");
+#else
+    FILE* file = fopen("/tmp/qr_debug.log", "a");
+#endif
+    if (!file) return;
+    fprintf(file, "%s\n", line.c_str());
+    fclose(file);
 }
+
+/// Draws the QR modules straight into the NanoVG context. Avoids going through
+/// SVG -> bitmap -> texture, which is fragile on the Switch renderer.
+class QrCodeView : public brls::View {
+public:
+    QrCodeView() { this->setClipsToBounds(false); }
+
+    bool setQrContent(const std::string& content) {
+        this->modules.clear();
+        this->size = 0;
+
+        if (content.empty()) {
+            this->invalidate();
+            return false;
+        }
+
+        try {
+            qrcodegen::QrCode qr =
+                qrcodegen::QrCode::encodeText(content.c_str(), qrcodegen::QrCode::Ecc::MEDIUM);
+            this->size = qr.getSize();
+            this->modules.resize(static_cast<size_t>(this->size) * this->size);
+            for (int y = 0; y < this->size; y++) {
+                for (int x = 0; x < this->size; x++) {
+                    this->modules[static_cast<size_t>(y) * this->size + x] =
+                        qr.getModule(x, y) ? 1 : 0;
+                }
+            }
+        } catch (const std::exception& error) {
+            qrDebugLog(std::string("qr: encode threw: ") + error.what());
+            this->size = 0;
+            this->modules.clear();
+            this->invalidate();
+            return false;
+        }
+
+        char line[160];
+        snprintf(line, sizeof(line),
+                 "qr: encoded len=%zu size=%d view=%.0fx%.0f scale=%.2f vis=%d", content.size(),
+                 this->size, this->getWidth(), this->getHeight(),
+                 brls::Application::windowScale, (int)this->getVisibility());
+        qrDebugLog(line);
+
+        this->invalidate();
+        return true;
+    }
+
+    void clearQr() {
+        if (this->modules.empty()) return;
+        this->size = 0;
+        this->modules.clear();
+        this->invalidate();
+    }
+
+    void draw(NVGcontext* vg, float x, float y, float width, float height, brls::Style style,
+              brls::FrameContext* ctx) override {
+        if (this->size <= 0 || this->modules.empty()) return;
+
+        if (this->drawCount < 3) {
+            char line[120];
+            snprintf(line, sizeof(line), "qr: draw #%d %.0fx%.0f size=%d", this->drawCount, width,
+                     height, this->size);
+            qrDebugLog(line);
+            this->drawCount++;
+        }
+
+        const int border = 4;
+        const int total  = this->size + border * 2;
+
+        float cell = std::min(width, height) / static_cast<float>(total);
+        if (cell <= 0) return;
+        float qr   = cell * total;
+        float ox   = x + (width - qr) / 2.0f;
+        float oy   = y + (height - qr) / 2.0f;
+
+        // White quiet zone; scanners need the light border around the modules.
+        nvgBeginPath(vg);
+        nvgRoundedRect(vg, ox, oy, qr, qr, 12.0f);
+        nvgFillColor(vg, nvgRGB(255, 255, 255));
+        nvgFill(vg);
+
+        nvgBeginPath(vg);
+        for (int my = 0; my < this->size; my++) {
+            for (int mx = 0; mx < this->size; mx++) {
+                if (!this->modules[static_cast<size_t>(my) * this->size + mx]) continue;
+                float px = ox + static_cast<float>(mx + border) * cell;
+                float py = oy + static_cast<float>(my + border) * cell;
+                // Slight overlap so fractional cell sizes leave no seams.
+                nvgRect(vg, px, py, cell + 0.5f, cell + 0.5f);
+            }
+        }
+        nvgFillColor(vg, nvgRGB(16, 16, 16));
+        nvgFill(vg);
+    }
+
+private:
+    int size = 0;
+    int drawCount = 0;
+    std::vector<unsigned char> modules;
+};
 
 QRLoginView::QRLoginView() {
     this->setAxis(brls::Axis::COLUMN);
     this->setAlignItems(brls::AlignItems::CENTER);
     this->setJustifyContent(brls::JustifyContent::CENTER);
 
-    this->qrImage = new SVGImage();
+    this->qrImage = new QrCodeView();
     this->qrImage->setDimensions(320, 320);
     this->qrImage->setVisibility(brls::Visibility::GONE);
     this->addView(this->qrImage);
@@ -70,11 +153,18 @@ QRLoginView::QRLoginView() {
 }
 
 void QRLoginView::setQrContent(const std::string& content) {
-    if (content.empty()) {
+    bool ok = !content.empty() && this->qrImage->setQrContent(content);
+    char line[160];
+    snprintf(line, sizeof(line),
+             "qr: setQrContent ok=%d box=%.0fx%.0f qr=%.0fx%.0f parentVis=%d", (int)ok,
+             this->getWidth(), this->getHeight(), this->qrImage->getWidth(),
+             this->qrImage->getHeight(), (int)this->getVisibility());
+    qrDebugLog(line);
+
+    if (!ok) {
         this->qrImage->setVisibility(brls::Visibility::GONE);
         return;
     }
-    this->qrImage->setImageFromSVGString(qrToSvg(content));
     this->qrImage->setVisibility(brls::Visibility::VISIBLE);
 }
 
@@ -83,6 +173,8 @@ void QRLoginView::setStatus(const std::string& status) {
 }
 
 void QRLoginView::showLoading(const std::string& message) {
+    qrDebugLog("qr: showLoading");
+    this->qrImage->clearQr();
     this->qrImage->setVisibility(brls::Visibility::GONE);
     this->setStatus(message);
 }

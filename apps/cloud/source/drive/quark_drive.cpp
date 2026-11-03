@@ -4,9 +4,11 @@
 
 #include "cloud/drive/quark_drive.hpp"
 
+#include <cstdio>
+#include <exception>
 #include <random>
-#include <thread>
 
+#include "cpr/async.h"
 #include "nxkit/auth_store.hpp"
 
 using json = nlohmann::json;
@@ -14,6 +16,18 @@ using json = nlohmann::json;
 namespace cloud {
 
 namespace {
+
+// Temporary on-device diagnostics: writes to the same log the QR view uses.
+void netDebugLog(const std::string& line) {
+#ifdef __SWITCH__
+    FILE* file = fopen("sdmc:/switch/nxkit/qr_debug.log", "a");
+#else
+    FILE* file = fopen("/tmp/qr_debug.log", "a");
+#endif
+    if (!file) return;
+    fprintf(file, "%s\n", line.c_str());
+    fclose(file);
+}
 
 const char* kDriveBase = "https://drive.quark.cn/1/clouddrive";
 const char* kUopBase = "https://uop.quark.cn/cas/ajax";
@@ -64,7 +78,18 @@ std::string resolveLocation(const std::string& base, const std::string& location
     return location;
 }
 
-void runAsync(std::function<void()> task) { std::thread(std::move(task)).detach(); }
+void runAsync(std::function<void()> task) {
+    // Use cpr's worker pool instead of a bare detached std::thread: detached
+    // threads crash on the Switch, and an uncaught exception there would kill
+    // the whole app.
+    cpr::async([task = std::move(task)]() mutable {
+        try {
+            task();
+        } catch (const std::exception& e) {
+            netDebugLog(std::string("async: exception ") + e.what());
+        }
+    });
+}
 
 }  // namespace
 
@@ -124,6 +149,11 @@ void QuarkDrive::qrToken(
         std::string(kUopBase) + "/getTokenForQrcodeLogin",
         {{"client_id", "532"}, {"v", "1.2"}, {"request_id", uuid4()}},
         [callback](const nxkit::HttpResult& result) {
+            char line[400];
+            snprintf(line, sizeof(line), "net: qrToken ok=%d code=%d status=%ld error=%s body=%.180s",
+                     (int)result.ok, result.code, result.status, result.error.c_str(),
+                     result.body.c_str());
+            netDebugLog(line);
             if (!result.ok) return callback("", "", result.error);
             json root = result.json();
             std::string token = root.value("data", json::object())
@@ -131,6 +161,7 @@ void QuarkDrive::qrToken(
                                     .value("token", "");
             if (token.empty())
                 return callback("", "", root.value("message", "no token"));
+            netDebugLog("net: qrToken got token");
             std::string content =
                 "https://su.quark.cn/4_eMHBJ?token=" + token +
                 "&client_id=532&ssb=weblogin&uc_param_str=&uc_biz_str="
@@ -168,13 +199,19 @@ void QuarkDrive::qrPoll(
 
             // Exchange the ticket for cookies (follows redirects manually),
             // then fill in the remaining drive cookies.
+            netDebugLog("poll: got service ticket");
             runAsync([this, ticket, callback] {
+                netDebugLog("poll: exchanging ticket");
                 collectCookies("https://pan.quark.cn/account/info?st=" + ticket +
                                "&lw=scan");
+                netDebugLog("poll: ticket exchanged");
                 driveGet("/config", {},
-                         [this, callback](const json&, const std::string&) {
+                         [this, callback](const json&, const std::string& error) {
+                             netDebugLog(("poll: config done err=" + error).c_str());
                              saveCookie();
+                             netDebugLog("poll: cookie saved");
                              callback(QrStatus::Success, "");
+                             netDebugLog("poll: success callback returned");
                          });
             });
         });
@@ -366,7 +403,7 @@ void QuarkDrive::videoStreams(
                        const std::string& defaultResolution,
                        const std::string& error)> callback) {
     json body = {{"fid", fileId},
-                 {"resolutions", "low,normal,high,super,2k,4k"},
+                 {"resolutions", "normal,high,super,2k,4k"},
                  {"supports", "fmp4_av,m3u8,dolby_vision"}};
     drivePost("/file/v2/play/project", body,
               [callback](const json& root, const std::string& error) {

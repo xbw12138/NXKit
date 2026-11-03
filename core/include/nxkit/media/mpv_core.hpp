@@ -83,6 +83,12 @@ public:
     void setUrl(const std::string& url, const std::string& extra = "",
                 const std::string& method = "replace");
 
+    /// Sets the extra HTTP headers sent by the built-in http stream
+    /// ("Name: value" entries joined with ','). Must be called before
+    /// setUrl(); passing them as loadfile options does not work because mpv
+    /// parses those as option=value pairs.
+    void setHttpHeaders(const std::string& headers);
+
     void setVolume(int64_t value);
     void resume();
     void pause();

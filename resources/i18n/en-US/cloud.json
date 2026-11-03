@@ -10,6 +10,7 @@
     "waiting": "Waiting for scan",
     "scanned": "Scanned, confirm on your phone",
     "expired": "QR code expired, tap refresh",
+    "failed": "Could not fetch the QR code, try again",
     "success": "Signed in"
   },
   "files": {

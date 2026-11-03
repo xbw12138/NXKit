@@ -18,6 +18,9 @@ struct HttpResult {
     long status = 0;
     std::string body;
     std::string error;
+    /// cpr error category (0 when the request completed). Useful on Switch,
+    /// where libcurl's error buffer can come back empty.
+    int code = 0;
     /// Raw "Set-Cookie" header returned by the server (may be empty).
     std::string setCookie;
     /// Cookies parsed from all Set-Cookie headers of the final response.
@@ -51,6 +54,15 @@ public:
 
     void setBearerToken(const std::string& token) { bearer = token; }
     void setVerifySsl(bool verify) { verifySsl = verify; }
+    /// CA bundle (PEM) used for certificate verification. Empty means "use
+    /// the shared default" (set via setDefaultCaBundle, usually
+    /// romfs:/cacert.pem on Switch) or the system trust store.
+    void setCaBundle(const std::string& path) { caBundle = path; }
+    static void setDefaultCaBundle(const std::string& path);
+    /// Applies the resolved CA bundle (if any) to a raw cpr session, for code
+    /// that performs its own streaming requests. Call before setting
+    /// cpr::VerifySsl so an explicit verify flag still wins.
+    static void applyCaBundle(cpr::Session& session);
     void setFollowRedirects(bool follow) { followRedirects = follow; }
 
     void setTimeout(int milliseconds) { timeoutMs = milliseconds; }
@@ -73,6 +85,10 @@ private:
     cpr::Header headers() const;
     int timeoutFor(int timeout) const;
     cpr::Redirect redirect() const;
+    cpr::SslOptions sslOptions() const;
+    std::string caBundlePath() const { return caBundle.empty() ? sharedCaBundle() : caBundle; }
+
+    static const std::string& sharedCaBundle();
 
     static cpr::Parameters toParameters(const Query& query);
     static cpr::Payload toPayload(const Query& form);
@@ -81,8 +97,17 @@ private:
     std::map<std::string, std::string> extraHeaders;
     std::string cookieValue;
     std::string bearer;
-    bool verifySsl = true;
+    bool verifySsl =
+#ifdef __SWITCH__
+        // No system trust store and the console clock is usually wrong, so
+        // certificate verification fails on every request (wiliwili does the
+        // same). Call setVerifySsl(true) plus setCaBundle() to opt back in.
+        false;
+#else
+        true;
+#endif
     bool followRedirects = true;
+    std::string caBundle;
     int timeoutMs = 10000;
 };
 
